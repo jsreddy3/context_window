@@ -1,10 +1,22 @@
 import tiktoken
 import openai
 import json
+from enum import Enum
+
+class DataPolicy(Enum):
+    PURE = "pure"
+    REMOVE = "remove"
+    SUMMARIZE = "summarize"
+    # Add other policies as required
+
+class FunctionPolicy(Enum):
+    INCLUDE = "include"
+    IGNORE = "ignore"
+    # Add other policies as required
 
 class ContextWindow:
 
-    def __init__(self, high_level_overview, default_data_policy="pure", model_name="gpt-3.5-turbo", max_tokens=2048, summarization_system = None):
+    def __init__(self, high_level_overview, default_data_policy=DataPolicy.PURE, model_name="gpt-3.5-turbo", max_tokens=2048, summarization_system = None):
         """
         Initializes the ContextWindow class.
         
@@ -16,19 +28,22 @@ class ContextWindow:
             summarization_system (str, optional): Specific instructions for how to conduct summarization.
         """
         self.high_level_overview = high_level_overview
+        self.high_level_overview_tokens = _token_count(high_level_overview)
         self.default_data_policy = default_data_policy
         self.model_name = model_name
         self.max_tokens = max_tokens
         self.messages = []
         self.enhanced_messages = []
-        self.total_tokens = 0
+        self.total_tokens = self.high_level_overview_tokens
         self.tokens_sent = 0  # Counter for tokens sent to the OpenAI API
 
         self.summarization_messages = []
         summarization_system = summarization_system if summarization_system else "You are an assistant that is helping make a more functional version of GPT. In iterative, data-intensive conversations, such as debugging, the context window gets filled with old data. For example, after debugging an error stack, keeping that error stack in the context window on subsequent messages is unproductive. To counter this, you are being used to summarize previous data that is no longer directly relevant, but for which some information must be saved. For example, if the user copy and pastes their entire code, you might return 'The user provided their entire program, but to save context window space this has been optimized out of the conversation'."
         self.summarization_messages.append(_construct_role_dict("system", summarization_system))
 
-    def add_message(self, user_content, data=None, data_policy=None, function_info=None, function_policy="ignore"):
+        self.messages.append(_construct_role_dict("system", self.high_level_overview))
+
+    def add_message(self, user_content, data=None, data_policy=None, function_info=None, function_policy=FunctionPolicy.IGNORE):
         """
         Adds a new user message to the context window.
 
@@ -40,10 +55,12 @@ class ContextWindow:
             function_policy (str, optional): Policy regarding function information (include/don't include). Defaults to "include".
         """
         
-        self.messages.append(user_content + data)
-        message_struct = _construct_message_dict(user_content, data, data_policy, function_info, function_policy)
+        # update messages and enhanced messages list
+        self.messages.append(_construct_role_dict("user", user_content + data))
+        message_struct = _construct_role_dict(user_content, data, data_policy, function_info, function_policy)
         self.enhanced_messages.append(message_struct)
 
+        # convert previous user message into a compressed version, applying data and function policy
         # -3 is used because the array should be layed out as: user_msg, model_response, user_msg. So previous user msg should be third from back
         if (len(self.messages) >= 3):
           prev_user_message = self.enhanced_messages[-3]
@@ -51,7 +68,8 @@ class ContextWindow:
           self.messages[-3] = _message_dict_to_message(prev_user_message)
           self.total_tokens += self.messages[-3]['token_count']
 
-        model_response = _call_openai(self.messages, function_info)
+        idx = _fit_context_window()
+        model_response = _call_openai(self.messages[idx:], message_struct['function_info'])
         res = {}
         if (model_response.get("function_call")):
           parsed_message = _generate_function_description(model_response.get("function_call"))
@@ -61,39 +79,32 @@ class ContextWindow:
           res["model_response"] = model_response.get("content")
         
         self.enhanced_messages.append(res)
-        self.messages.append(_construct_message_dict("assistant", res["model_response"]))
+        self.messages.append(_construct_role_dict("assistant", res["model_response"]))
 
         return res
 
-    def generate_message_summary(self, message_index):
+    def generate_message_summary(self, data):
         """
         Generates a summary for the given message based on its data policy.
 
         Args:
-            message_index (int): Index of the message in the enhanced_messages list.
+            data (string): Index of the message in the enhanced_messages list.
         """
-        pass
+        self.summarization_messages.append(_construct_role_dict("user", f"Please summarize the following: {data}"))
+        model_response = _call_openai(self.summarization_messages)
+        self.summarization_messages.remove(-1)
 
-    def update_messages_list(self):
-        """
-        Updates the messages list based on the current enhanced_messages. Ensures the conversation stays within the token limit.
-        """
-        pass
+        return model_response.get("content")
 
     def visualize_context_window(self):
         """
-        Provides a representation of the current messages and enhanced_messages for visualization.
+        Provides a representation of the current messages for visualization.
         """
-        pass
-
-    def _get_current_messages_for_api(self):
-        """
-        Returns the current messages list ready to be sent to the OpenAI API.
-
-        Returns:
-            list: List of messages to be sent to the API.
-        """
-        pass
+        for idx, message in enumerate(self.messages):
+            print(f"Message {idx + 1}:")
+            print(f"Role: {message['role']}")
+            print(f"Content: {message['content']}")
+            print("------------------------")
 
     def _token_count(self, message):
         """
@@ -107,6 +118,38 @@ class ContextWindow:
         """
         encoder = tiktoken.encoding_for_model(self.model_name)
         return len(encoder.encode(message))
+
+    def _fit_context_window(self):
+        """
+        Updates the messages list based on the current enhanced_messages. Ensures the conversation stays within the token limit.
+        Returns the index from which the messages should be considered to fit within the token limit.
+        """
+        # Count tokens for the most recent user message in enhanced_messages
+        recent_user_message_tokens = self.enhanced_messages[-1]['token_count']
+
+        # If high_level_overview and recent_user_message together exceed max tokens, raise an error
+        if self.high_level_overview_tokens + recent_user_message_tokens > self.max_tokens:
+            raise ValueError("High level overview and the recent user message together exceed token limit!")
+
+        # Remaining token budget after accounting for high_level_overview and total tokens used so far
+        remaining_tokens = self.max_tokens - self.total_tokens - self.high_level_overview_tokens
+
+        # If remaining tokens are negative, we need to figure out from which index we should consider messages
+        if remaining_tokens < 0:
+            # Loop from the start, and track the first index from which messages can fit within the remaining token limit
+            accumulated_tokens = 0
+            start_idx = 0  # Default index in case all messages fit
+            for idx, message in enumerate(self.messages):
+                accumulated_tokens += message['token_count']
+
+                # Check if the accumulated tokens from this point onward will fit within the remaining token limit
+                if accumulated_tokens <= abs(remaining_tokens):
+                    start_idx = idx
+                    break
+
+            return start_idx
+
+        return 0  # If all messages fit, return the default index
 
     def _create_function_info(self, name, description, parameter_list):
         """
@@ -155,7 +198,9 @@ class ContextWindow:
         Returns:
             str: A description of the function call.
         """
-        
+        if model_func == None:
+          return None
+
         function_name = model_func.get("name", "")
         arguments = json.loads(model_func.get("arguments", "{}"))
         
@@ -169,7 +214,7 @@ class ContextWindow:
         
         return " ".join(description_parts)
 
-    def _construct_message_dict(self, user_content, data=None, data_policy=None, function_info=None, function_policy="ignore"):
+    def _construct_message_dict(self, user_content, data=None, data_policy=None, function_info=None, function_policy=FunctionPolicy.IGNORE):
       """
       Constructs a message dictionary with user content, data, data policy, and function information. 
 
@@ -187,7 +232,7 @@ class ContextWindow:
           "user_content": user_content,
           "data": data,
           "data_policy": data_policy,
-          "function_info": function_info,
+          "function_info": _create_function_info(function_info['name'], function_info['description'], function_info['parameter_list']),
           "function_policy": function_policy,
           "token_count": _token_count(user_content) + _token_count(data) + _token_count(str(function_info))
       }
@@ -207,13 +252,13 @@ class ContextWindow:
         }
 
         data_msg = ""
-        if message_dict["data_policy"] == "pure":
+        if message_dict["data_policy"] == DataPolicy.PURE:
             data_msg = data
-        elif message_dict["data_policy"] == "remove":
-            data_msg = None
-        else:
+        elif message_dict["data_policy"] == DataPolicy.SUMMARIZE:
             summary = generate_message_summary(data)
             data_msg = summary
+        else:
+            data_msg = None
 
         if data_msg != "":
           final_message += f" Along with this message, the user sent the following data: {data_msg}."
