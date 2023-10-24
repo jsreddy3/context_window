@@ -240,6 +240,16 @@ class ContextWindow:
       return message_dict
 
     def _message_dict_to_message(self, message_dict):
+        """
+        Convert a message dictionary into a string representation.
+
+        Parameters:
+        - message_dict: Dictionary containing message data.
+
+        Returns:
+        - A string representation of the message.
+        """
+
         final_message = ""
         final_message += message_dict["user_content"]
         message_dict["token_count"] = _token_count(message_dict["user_content"])
@@ -286,6 +296,17 @@ class ContextWindow:
         return final_message
 
     def _construct_role_dict(self, role, content):
+      """
+      Constructs a dictionary representing a role and its content.
+
+      Parameters:
+      - role: Role string (e.g., 'user', 'system').
+      - content: Content associated with the role.
+
+      Returns:
+      - A dictionary with 'role' and 'content'.
+      """
+
       return {
         "role": role,
         "content": content
@@ -293,8 +314,19 @@ class ContextWindow:
 
     def _call_openai(self, messages, function_info=None, max_retries=1, wait_time=1, examples=[]):
         """
-        Communicates with OpenAI API for results.
+        Communicate with the OpenAI API to get a response.
+
+        Parameters:
+        - messages: List of message dictionaries to send.
+        - function_info: Optional dictionary containing function details.
+        - max_retries: Number of times to retry in case of a JSONDecodeError.
+        - wait_time: Time in seconds to wait between retries.
+        - examples: List of example dictionaries.
+
+        Returns:
+        - The response message from OpenAI API.
         """
+        
         self.tokens_sent += self.total_tokens
         functions = [function_info] if function_info else []
 
