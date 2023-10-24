@@ -7,15 +7,12 @@ class DataPolicy(Enum):
     PURE = "pure"
     REMOVE = "remove"
     SUMMARIZE = "summarize"
-    # Add other policies as required
 
 class FunctionPolicy(Enum):
     INCLUDE = "include"
     IGNORE = "ignore"
-    # Add other policies as required
 
 class ContextWindow:
-
     def __init__(self, high_level_overview, default_data_policy=DataPolicy.PURE, model_name="gpt-3.5-turbo", max_tokens=2048, summarization_system = None):
         """
         Initializes the ContextWindow class.
@@ -38,7 +35,7 @@ class ContextWindow:
         self.tokens_sent = 0  # Counter for tokens sent to the OpenAI API
 
         self.summarization_messages = []
-        summarization_system = summarization_system if summarization_system else "You are an assistant that is helping make a more functional version of GPT. In iterative, data-intensive conversations, such as debugging, the context window gets filled with old data. For example, after debugging an error stack, keeping that error stack in the context window on subsequent messages is unproductive. To counter this, you are being used to summarize previous data that is no longer directly relevant, but for which some information must be saved. For example, if the user copy and pastes their entire code, you might return 'The user provided their entire program, but to save context window space this has been optimized out of the conversation'."
+        summarization_system = summarization_system if summarization_system else "You are an assistant that is helping make a more functional version of GPT. In iterative, data-intensive conversations, such as debugging, the context window gets filled with old data. For example, after debugging an error stack, keeping that error stack in the context window on subsequent messages is unproductive. To counter this, you are being used to summarize previous data that is no longer directly relevant, but for which some information must be saved. For example, if the user copy and pastes their entire code, you might return "The user provided their entire program, but to save context window space this has been optimized out of the conversation"."
         self.summarization_messages.append(_construct_role_dict("system", summarization_system))
 
         self.messages.append(_construct_role_dict("system", self.high_level_overview))
@@ -52,7 +49,7 @@ class ContextWindow:
             data (str, optional): Associated data. Defaults to None.
             data_policy (str, optional): Data handling policy. If None, uses default. Defaults to None.
             function_info (dict, optional): Information about the associated function. Defaults to None.
-            function_policy (str, optional): Policy regarding function information (include/don't include). Defaults to "include".
+            function_policy (str, optional): Policy regarding function information (include/don"t include). Defaults to "include".
         """
         
         # update messages and enhanced messages list
@@ -64,12 +61,12 @@ class ContextWindow:
         # -3 is used because the array should be layed out as: user_msg, model_response, user_msg. So previous user msg should be third from back
         if (len(self.messages) >= 3):
           prev_user_message = self.enhanced_messages[-3]
-          self.total_tokens -= prev_user_message['token_count']
+          self.total_tokens -= prev_user_message["token_count"]
           self.messages[-3] = _message_dict_to_message(prev_user_message)
-          self.total_tokens += self.messages[-3]['token_count']
+          self.total_tokens += self.messages[-3]["token_count"]
 
         idx = _fit_context_window()
-        model_response = _call_openai(self.messages[idx:], message_struct['function_info'])
+        model_response = _call_openai(self.messages[idx:], message_struct["function_info"])
         res = {}
         if (model_response.get("function_call")):
           parsed_message = _generate_function_description(model_response.get("function_call"))
@@ -102,8 +99,8 @@ class ContextWindow:
         """
         for idx, message in enumerate(self.messages):
             print(f"Message {idx + 1}:")
-            print(f"Role: {message['role']}")
-            print(f"Content: {message['content']}")
+            print(f"Role: {message["role"]}")
+            print(f"Content: {message["content"]}")
             print("------------------------")
 
     def _token_count(self, message):
@@ -125,7 +122,7 @@ class ContextWindow:
         Returns the index from which the messages should be considered to fit within the token limit.
         """
         # Count tokens for the most recent user message in enhanced_messages
-        recent_user_message_tokens = self.enhanced_messages[-1]['token_count']
+        recent_user_message_tokens = self.enhanced_messages[-1]["token_count"]
 
         # If high_level_overview and recent_user_message together exceed max tokens, raise an error
         if self.high_level_overview_tokens + recent_user_message_tokens > self.max_tokens:
@@ -140,7 +137,7 @@ class ContextWindow:
             accumulated_tokens = 0
             start_idx = 0  # Default index in case all messages fit
             for idx, message in enumerate(self.messages):
-                accumulated_tokens += message['token_count']
+                accumulated_tokens += message["token_count"]
 
                 # Check if the accumulated tokens from this point onward will fit within the remaining token limit
                 if accumulated_tokens <= abs(remaining_tokens):
@@ -190,10 +187,10 @@ class ContextWindow:
 
     def _generate_function_description(self, model_func):
         """
-        Generates a description string based on the function call in the model's response.
+        Generates a description string based on the function call in the model"s response.
 
         Args:
-            function_response (dict): The 'function_call' key from the model's response.
+            function_response (dict): The "function_call" key from the model"s response.
 
         Returns:
             str: A description of the function call.
@@ -205,39 +202,39 @@ class ContextWindow:
         arguments = json.loads(model_func.get("arguments", "{}"))
         
         if not arguments:
-            return f"The model attempted to call the function '{function_name}' but did not provide any parameters."
+            return f"The model attempted to call the function "{function_name}" but did not provide any parameters."
         
-        description_parts = [f"The model returned function parameters for the requested function '{function_name}'."]
+        description_parts = [f"The model returned function parameters for the requested function "{function_name}"."]
         
         for param, value in arguments.items():
-            description_parts.append(f"For parameter '{param}', the model generated '{value}'.")
+            description_parts.append(f"For parameter "{param}", the model generated "{value}".")
         
         return " ".join(description_parts)
 
     def _construct_message_dict(self, user_content, data=None, data_policy=None, function_info=None, function_policy=FunctionPolicy.IGNORE):
-      """
-      Constructs a message dictionary with user content, data, data policy, and function information. 
+        """
+        Constructs a message dictionary with user content, data, data policy, and function information. 
 
-      Args:
-          user_content (str): The main content of the message from the user.
-          data (Any, optional): Any associated data with the message. Defaults to None.
-          data_policy (str, optional): Policy for how to handle the provided data. Can be "pure", "remove", or another custom policy. Defaults to None.
-          function_info (dict, optional): Dictionary containing function name, description, and parameters. Defaults to None.
-          function_policy (str, optional): Policy for how to handle the function information. Can be "include", "ignore", or another custom policy. Defaults to "ignore".
+        Args:
+            user_content (str): The main content of the message from the user.
+            data (Any, optional): Any associated data with the message. Defaults to None.
+            data_policy (str, optional): Policy for how to handle the provided data. Can be "pure", "remove", or another custom policy. Defaults to None.
+            function_info (dict, optional): Dictionary containing function name, description, and parameters. Defaults to None.
+            function_policy (str, optional): Policy for how to handle the function information. Can be "include", "ignore", or another custom policy. Defaults to "ignore".
 
-      Returns:
-          dict: A structured message dictionary with the provided data and policies.
-      """
-      message_dict = {
-          "user_content": user_content,
-          "data": data,
-          "data_policy": data_policy,
-          "function_info": _create_function_info(function_info['name'], function_info['description'], function_info['parameter_list']),
-          "function_policy": function_policy,
-          "token_count": _token_count(user_content) + _token_count(data) + _token_count(str(function_info))
-      }
+        Returns:
+            dict: A structured message dictionary with the provided data and policies.
+        """
+        message_dict = {
+            "user_content": user_content,
+            "data": data,
+            "data_policy": data_policy,
+            "function_info": _create_function_info(function_info["name"], function_info["description"], function_info["parameter_list"]),
+            "function_policy": function_policy,
+            "token_count": _token_count(user_content) + _token_count(data) + _token_count(str(function_info))
+        }
 
-      return message_dict
+        return message_dict
 
     def _message_dict_to_message(self, message_dict):
         """
@@ -267,15 +264,17 @@ class ContextWindow:
         elif message_dict["data_policy"] == DataPolicy.SUMMARIZE:
             summary = generate_message_summary(data)
             data_msg = summary
-        else:
+        elif message_dict["data_policy"] == DataPolicy.REMOVE:
             data_msg = None
+        else:
+            raise ValueError("Did not pass a valid function policy!")
 
         if data_msg != "":
           final_message += f" Along with this message, the user sent the following data: {data_msg}."
           message_dict["token_count"] += _token_count(data_msg)
 
         if message_dict["function_policy"] == "include" and function_info:
-            function_desc = f" Along with this message, the user requested for their function named {function_info['name']} to be supplied with the following parameters:"
+            function_desc = f" Along with this message, the user requested for their function named {function_info["name"]} to be supplied with the following parameters:"
             params = []
 
             for param_name, param_info in function_info["parameters"]["properties"].items():
@@ -285,7 +284,7 @@ class ContextWindow:
                 if param_type == "array":
                     param_type_desc += param_info["items"]["type"] + "s"
                 else:
-                    param_type_desc += " " + param_info['description']
+                    param_type_desc += " " + param_info["description"]
 
                 params.append(param_type_desc)
 
@@ -296,21 +295,21 @@ class ContextWindow:
         return final_message
 
     def _construct_role_dict(self, role, content):
-      """
-      Constructs a dictionary representing a role and its content.
+        """
+        Constructs a dictionary representing a role and its content.
 
-      Parameters:
-      - role: Role string (e.g., 'user', 'system').
-      - content: Content associated with the role.
+        Parameters:
+        - role: Role string (e.g., "user", "system").
+        - content: Content associated with the role.
 
-      Returns:
-      - A dictionary with 'role' and 'content'.
-      """
+        Returns:
+        - A dictionary with "role" and "content".
+        """
 
-      return {
-        "role": role,
-        "content": content
-      }
+        return {
+          "role": role,
+          "content": content
+        }
 
     def _call_openai(self, messages, function_info=None, max_retries=1, wait_time=1, examples=[]):
         """
@@ -326,14 +325,14 @@ class ContextWindow:
         Returns:
         - The response message from OpenAI API.
         """
-        
+
         self.tokens_sent += self.total_tokens
         functions = [function_info] if function_info else []
 
         for example in examples:
             example_message = {
                 "role": "user",
-                "content": f"Document: {example['document']}. Fields: {json.dumps(example['fields'])}."
+                "content": f"Document: {example["document"]}. Fields: {json.dumps(example["fields"])}."
             }
             messages.append(example_message)
 
